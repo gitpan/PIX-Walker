@@ -9,6 +9,7 @@ lib/PIX/Accesslist.pm
 lib/PIX/Object.pm
 lib/PIX/Walker.pm
 lib/PIX/Accesslist/Line.pm
+lib/PIX/Object/icmp_type.pm
 lib/PIX/Object/network.pm
 lib/PIX/Object/service.pm
 lib/PIX/Object/protocol.pm

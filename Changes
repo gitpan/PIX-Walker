@@ -1,5 +1,17 @@
 Revision history for PIX-Walker
 
+1.03	June 13, 2006
+	Added some methods to PIX::Accesslist::Line for fetching
+	the logical elements of a line as strings (protocol, source, 
+	dest, etc..)
+
+	Normalized the PIX::Walker standard set of port aliases.
+
+	Added PIX::Object::icmp_type -- Doesn't actually do anything
+	though. It's a useless object type to me at the moment. This
+	is included so configs with object-groups of icmp-type will 
+	be processed correctly.
+
 1.02    June 07, 2006
         First version, released on an unsuspecting world.
 

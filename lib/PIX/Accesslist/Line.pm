@@ -3,17 +3,18 @@ package PIX::Accesslist::Line;
 use strict;
 use warnings;
 
-our $VERSION = '1.00';
+our $VERSION = '1.01';
 
 =pod
 
 =head1 NAME
 
-PIX::Accesslist::Line - Object for each line of an ACL line.
+PIX::Accesslist::Line - ACL line object for each line of an PIX::Accesslist.
 
 =head1 SYNOPSIS
 
 PIX::Accesslist::Line is used by PIX::Accesslist to hold a single line of an ACL.
+Each line can be searched against a set of IP & port criteria to find a match.
 
 See B<PIX::Accesslist> for more information regarding PIX Accesslists.
 
@@ -53,7 +54,7 @@ sub _init { }
 
 =over
 
-Returns the total elements (ACE) for the ACL line.
+Returns the total access-list elements (ACE) for the ACL line.
 B<Note:> It's not wise to call this over and over again. Store the result
 in a variable and use that variable if you need to use this result in multiple
 places.
@@ -90,15 +91,15 @@ you get accurate matching you must provide all criteria shown below.
 
 =over
 
-* source  Source IP
+* source : Source IP
 
-* sport   Source Port
+* sport  : Source Port
 
-* dest    Destination IP
+* dest   : Destination IP
 
-* dport   Destionation Port
+* dport  : Destionation Port
 
-* proto   Protocol
+* proto  : Protocol
 
 =back
 
@@ -160,19 +161,17 @@ sub print {
 	my $self = shift;
 	my $output = '';
 
-	$output .= sprintf("%3d) ", $self->{idx});
-	$output .= sprintf("%6s %-10s", $self->{action}, "(" . join(',', $self->{proto}->list) . ")");
-#	$output .= " -> ";
-	$output .= $self->{source}->name =~ /^unnamed/ && $self->{source}->list == 1 ? $self->{source}->first : $self->{source}->name;
-	if ($self->{proto}->first !~ /^(ip|icmp)$/ && $self->{sport}) {
-		$output .= sprintf(" [%s]", $self->{sport}->name =~ /^unnamed/ && $self->{sport}->list == 1 ? $self->{sport}->first : $self->{sport}->name);
-	}
+	$output .= sprintf("%3d) ", $self->num);
+	$output .= sprintf("%6s %-10s", $self->{action}, "(" . $self->proto_str . ")");
+	$output .= $self->source_str;
+	$output .= " [" . $self->sourceport_str . "]" if $self->sourceport_str;
 	$output .= " -> ";
-	$output .= $self->{dest}->name =~ /^unnamed/ && $self->{dest}->list == 1 ? $self->{dest}->first : $self->{dest}->name;
+	$output .= $self->dest_str;
+
 	if ($self->{proto}->first !~ /^(ip|icmp)$/) {
-		if ($self->{dport}) {
+		if ($self->{dport} and $self->destport_str) {
 			$output .= sprintf(" [%s]", $self->{dport}->name =~ /^unnamed/ && $self->{dport}->enumerate == 1  
-				? join(',',$self->{dport}->enumerate) 
+				? $self->{dport}->enumerate
 				: $self->{dport}->enumerate <= 4
 					? $self->{dport}->name . ": " .join(',',$self->{dport}->enumerate) 
 					: $self->{dport}->name . " (" . $self->{dport}->list . " ranges; " . $self->{dport}->enumerate . " ports)"
@@ -209,6 +208,59 @@ or true if the ACL line is a permit or deny, respectively.
 sub permit { $_[0]->{action} eq 'permit' }
 sub deny   { $_[0]->{action} eq 'deny' }
 sub action { $_[0]->{action} }
+
+sub proto_str { return wantarray ? $_[0]->{proto}->list : join(',',$_[0]->{proto}->list) }
+sub source_str {
+	my $self = shift;
+	if ($self->{source}->name =~ /^unnamed/ && $self->{source}->list == 1) {
+		return $self->{source}->first;
+	} else {
+		return $self->{source}->name;
+	}
+}
+sub dest_str {
+	my $self = shift;
+	if ($self->{dest}->name =~ /^unnamed/ && $self->{dest}->list == 1) {
+		return $self->{dest}->first;
+	} else {
+		return $self->{dest}->name;
+	}
+}
+sub sourceport_str {
+	my $self = shift;
+	return '' unless $self->{proto}->first !~ /^(ip|icmp)$/ && $self->{sport};
+	if ($self->{sport}->name =~ /^unnamed/ && $self->{sport}->list == 1) {
+		return $self->{sport}->first;
+	} else {
+		return $self->{sport}->name;
+	}
+}
+sub destport_str {
+	my $self = shift;
+	return '' unless $self->{proto}->first !~ /^(ip|icmp)$/ && $self->{dport};
+	if ($self->{dport}->name =~ /^unnamed/ && $self->{dport}->enumerate == 1) {
+		return $self->{dport}->enumerate;
+	} else {
+		return $self->{dport}->name;
+	}
+}
+sub destportdetail_str {
+	my $self = shift;
+	return '' if $self->{dport}->name =~ /^unnamed/ && $self->{dport}->enumerate == 1;
+	if ($self->{dport}->enumerate <= 4) {
+		return join(',', $self->{dport}->enumerate);
+	} else {
+		return $self->{dport}->list . " ranges; " . $self->{dport}->enumerate . " ports)";
+	}
+	return '';
+}
+#	if ($self->{dport}->name =~ /^unnamed/ && $self->{dport}->enumerate == 1) {
+#		$output .= join(',',$self->{dport}->enumerate);
+#	} elsif ($self->{dport}->enumerate <= 4) {
+#		$output .= $self->{dport}->name . ": " .join(',',$self->{dport}->enumerate);
+#	} else {
+#		$output .= $self->{dport}->name . " (" . $self->{dport}->list . " ranges; " . $self->{dport}->enumerate . " ports)";
+#	}
 
 1; 
 

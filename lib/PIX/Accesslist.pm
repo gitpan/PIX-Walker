@@ -18,7 +18,8 @@ PIX::Accesslist - Accesslist object for use with PIX::Walker
 =head1 SYNOPSIS
 
 PIX::Accesslist is used by PIX::Walker to hold an ACL from a PIX firewall. 
-This allows you to programmatically step through an ACL.
+This allows you to programmatically step through an ACL and match lines
+to certain criteria.
 
 See B<PIX::Walker> for an example.
 

@@ -4,6 +4,8 @@ use strict;
 use warnings;
 use base qw( PIX::Object );
 
+our $VERSION = '1.00';
+
 sub _init {
 	my $self = shift;
 	$self->SUPER::_init;

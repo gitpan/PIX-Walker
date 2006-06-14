@@ -12,7 +12,7 @@ BEGIN {
 
 	our ($VERSION, @ISA, @EXPORT, @EXPORT_OK, %EXPORT_TAGS);
 
-	$VERSION = '1.02';
+	$VERSION = '1.03';
 
 	@ISA = qw(Exporter);
 	@EXPORT = qw();
@@ -132,6 +132,7 @@ sub _init {
 		'citrix-ica'		=> '1494',
 
 		# cisco PIX defined
+		'aol'			=> '5190',
 		'bgp'			=> '179',
 		'biff'			=> '512',
 		'bootpc'		=> '68',
@@ -158,6 +159,7 @@ sub _init {
 		'kshell'		=> '544',
 		'ldap'			=> '389',
 		'ldaps'			=> '636',
+		'lotusnotes'		=> '1352',
 		'lpd'			=> '515',
 		'login'			=> '513',
 		'mobile-ip'		=> '434',
@@ -169,7 +171,10 @@ sub _init {
 		'pim-auto-rp'		=> '496',
 		'pop2'			=> '109',
 		'pop3'			=> '110',
+		'pptp'			=> '1723',
 		'rip'			=> '520',
+		'rtsp'			=> '554',
+		'sip'			=> '5060',
 		'smtp'			=> '25',
 		'snmp'			=> '161',
 		'snmptrap'		=> '162',
@@ -193,7 +198,7 @@ sub _init {
 	# the first name-to-port lookup found is used and is not overwritten
 #	my @files = qw( ./port-numbers /usr/local/share/nmap/nmap-services /usr/share/nmap/nmap-services /etc/services );
 	my @files = qw( /usr/local/share/nmap/nmap-services /usr/share/nmap/nmap-services /etc/services );
-	while (0 && defined(my $file = shift @files)) {
+	while ( defined(my $file = shift @files)) {
 		next unless -f $file;
 		open(F, "<$file") or next;
 		while (defined(my $line = <F>)) {
