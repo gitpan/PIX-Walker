@@ -4,10 +4,9 @@ use strict;
 use warnings;
 
 use Carp;
-#use FWcommon;
 use PIX::Accesslist::Line;
 
-our $VERSION = '1.00';
+our $VERSION = '1.10';
 
 =pod
 
@@ -28,6 +27,8 @@ See B<PIX::Walker> for an example.
 
 =head1 METHODS
 
+=over
+
 =cut
 
 sub new {
@@ -43,7 +44,7 @@ sub new {
 	$self->{config_block} = [ @$config ];
 	$self->{walker} = $walker;
 	$self->{acl} = [];
-
+	$self->{linenum} = 0;
 
 	bless($self, $class);
 	$self->_init;
@@ -72,6 +73,7 @@ sub _init {
 		$line =~ s/^access-list $self->{name}(?: extended)? //;
 		next if $line =~ /^remark/;			# ignore remarks
 		next unless $line =~ s/^(permit|deny)//;	# strip off action
+
 		my $action = lc $1;
 		my $proto = $self->_getproto(\$line);
 		my $source = $self->_getnetwork(\$line);
@@ -79,7 +81,7 @@ sub _init {
 		my $dest = $self->_getnetwork(\$line);
 		my $dport = $self->_getports(\$line, $proto);		# ... 
 
-		my $o = new PIX::Accesslist::Line($action, $proto, $source, $sport, $dest, $dport, $idx);
+		my $o = new PIX::Accesslist::Line($action, $proto, $source, $sport, $dest, $dport, $idx, $self);
 		push(@{$self->{acl}}, $o);
 	}
 }
@@ -91,6 +93,14 @@ sub _getnetwork {
 	my $net;
 
 	my $word = $self->_nextword($line);
+
+	# ignore the 'inferface' source if specified, it does us no good
+	#if ($word eq 'interface') {
+	#	print "$$line\n";
+	#	$word = $self->_nextword($line);	# ignore the interface name
+	#	$word = $self->_nextword($line);	# get the next word which should actually be something we expect below
+	#}
+
 	if ($word eq 'object-group') {
 		$net = $self->{walker}->obj( $self->_nextword($line) );
 
@@ -107,11 +117,11 @@ sub _getnetwork {
 		my $name = 'unnamed_host_'.(++$self->{unnamed_host});
 		my $conf = [ 
 			"object-group network $name", 
-			"network-object " . $self->{walker}->alias($ip) . " 255.255.255.255" 
+			"network-object host " . $self->{walker}->alias($ip) 
 		];
 		$net = new PIX::Object('network', $name, $conf, $self->{walker});
 
-	} elsif (($word =~ /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/) or ($word ne $self->{walker}->alias($word))) {
+	} elsif (($word =~ /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/) || ($word ne $self->{walker}->alias($word))) {
 		my $name = 'unnamed_net_'.(++$self->{unnamed_net});
 		my $conf = [ 
 			"object-group network $name", 
@@ -120,8 +130,9 @@ sub _getnetwork {
 		$net = new PIX::Object('network', $name, $conf, $self->{walker});
 
 	} else {
-		print "** Unknown network: $word $$line\n";
+		warn "** Unknown network: '$word' at '$self->{name}' line $self->{linenum}: $$line\n";
 	}
+	
 	return $net;
 }
 
@@ -143,6 +154,11 @@ sub _getproto {
 	return $proto;
 }
 
+# returns the next 
+sub _geticmp {
+	my ($self, $line) = @_;
+}
+
 # returns the next service port(s) from the current line. $line is a ref
 sub _getports {
 	my ($self, $line, $proto) = @_;
@@ -153,37 +169,25 @@ sub _getports {
 	if ($word eq 'object-group') {
 		my $word2 = $self->_nextword($line);
 		my $obj = $self->{walker}->obj($word2);
-		$port = (defined($obj) and $obj->type eq 'service') ? $obj : undef;
-		# put the previous words back in the line, since it's going to be a valid network object-group
+		$port = (defined($obj) and $obj->type =~ /service|icmp-type/) ? $obj : undef;
+		#print "OBJ=$obj == " . join(',',$obj->enumerate) . "\n" if $obj and $obj->type eq 'icmp-type';
+		# put the previous words back in the line, since it's going to
+		# be a valid network object-group
 		if (!$port) {
 			$self->_rewindword($word2, $line);
 			$self->_rewindword($word, $line);
 		}
-	} elsif ($word eq 'eq') {
+	} elsif ($word eq 'eq' || $word eq 'gt' || $word eq 'lt' || $word eq 'neg') {
+		my $op = $word;
 		$word = $self->_nextword($line);
 		my $name = 'unnamed_service_'.(++$self->{unnamed_service});
-		my $conf = [ "object-group service $name", "port-object eq $word" ];
-		$port = new PIX::Object('service', $name, $conf, $self->{walker});
-	} elsif ($word eq 'gt') {
-		$word = $self->_nextword($line);
-		my $name = 'unnamed_service_'.(++$self->{unnamed_service});
-		my $conf = [ "object-group service $name", "port-object gt $word" ];
-		$port = new PIX::Object('service', $name, $conf, $self->{walker});
-	} elsif ($word eq 'lt') {
-		$word = $self->_nextword($line);
-		my $name = 'unnamed_service_'.(++$self->{unnamed_service});
-		my $conf = [ "object-group service $name", "port-object lt $word" ];
+		my $conf = [ "object-group service $name", "port-object $op $word" ];
 		$port = new PIX::Object('service', $name, $conf, $self->{walker});
 	} elsif ($word eq 'range') {
 		$word = $self->_nextword($line);
 		my $word2 = $self->_nextword($line);
 		my $name = 'unnamed_service_'.(++$self->{unnamed_service});
 		my $conf = [ "object-group service $name", "port-object range $word $word2" ];
-		$port = new PIX::Object('service', $name, $conf, $self->{walker});
-	} elsif ($word eq 'neg') {
-		$word = $self->_nextword($line);
-		my $name = 'unnamed_service_'.(++$self->{unnamed_service});
-		my $conf = [ "object-group service $name", "port-object neg $word" ];
 		$port = new PIX::Object('service', $name, $conf, $self->{walker});
 	} else {	# any other values (eg: 'log') are ignored
 		$self->_rewindword($word, $line);
@@ -198,7 +202,7 @@ sub _getports {
 	return $port;
 }
 
-=item B<elements()>
+=item B<elements( )>
 
 =over
 
@@ -217,7 +221,7 @@ sub elements {
 	return $total;
 }
 
-=item B<lines()>
+=item B<lines( )>
 
 =over
 
@@ -228,7 +232,7 @@ Returns all lines of the ACL. Each line is an B<PIX::Accesslist::Line> object.
 =cut
 sub lines { @{$_[0]->{acl}} }
 
-=item B<name()>
+=item B<name( )>
 
 =over
 
@@ -239,12 +243,16 @@ Returns the name of the ACL
 =cut
 sub name { $_[0]->{name} }
 
-=item B<print()>
+=item B<print([$any])>
 
 =over
 
 Pretty prints the ACL. Tries to make it easy to read. If object-group's are used
 the names are printed instead of IP's if more than a single IP is present for a line.
+
+$any is an optional string that will be used for any IP that represents 'ANY',
+defaults to: 0.0.0.0/0. It's useful to change this to 'ANY' to make the output
+easier to read.
 
   1)  permit (tcp)   192.168.0.0/24 -> 0.0.0.0/0 [Web_Services_tcp: 80,443]
   10) deny   (ip)    0.0.0.0/0 -> 0.0.0.0/0
@@ -254,25 +262,26 @@ the names are printed instead of IP's if more than a single IP is present for a 
 =cut
 sub print {
 	my $self = shift;
+	my $any = shift; # PIX::Accesslist::Line will default to 0.0.0.0/0
 	my $output = "----- Access-list $self->{name} -----\n";
-	$output .= $_->print . "\n" for $self->lines;
+	$output .= $_->print($any) . "\n" for $self->lines;
 	return $output;
 }
 
 # $line is a ref to a scalar string. The word returned is removed from the string
 sub _nextword { (${$_[1]} =~ s/^\s*(\S+)\s*//) ? $1 : undef; }
-sub _nextline { shift @{$_[0]->{config_block}} }
-sub _reset { $_[0]->{config_block} = $_[0]->{config} }
+sub _nextline { $_[0]->{linenum}++; shift @{$_[0]->{config_block}} }
+sub _reset { $_[0]->{linenum} = 0; $_[0]->{config_block} = $_[0]->{config} }
 sub _rewind { unshift @{$_[0]->{config_block}}, $_[1] }
 sub _rewindword { ${$_[2]} = $_[1] . " " . ${$_[2]} }
 
 1;
 
-__DATA__
+=pod
 
 =head1 AUTHOR
 
-Jason Morriss, C<< <lifo at liche.net> >>
+Jason Morriss <lifo 101 at - gmail dot com>
 
 =head1 BUGS
 
@@ -285,12 +294,19 @@ your bug as I make changes.
 =head1 SUPPORT
 
     perldoc PIX::Walker
+
     perldoc PIX::Accesslist
     perldoc PIX::Accesslist::Line
 
+    perldoc PIX::Object
+    perldoc PIX::Object::network
+    perldoc PIX::Object::service
+    perldoc PIX::Object::protocol
+    perldoc PIX::Object::icmp_type
+
 =head1 COPYRIGHT & LICENSE
 
-Copyright 2006 Jason Morriss, all rights reserved.
+Copyright 2006-2008 Jason Morriss, all rights reserved.
 
 This program is free software; you can redistribute it and/or modify it
 under the same terms as Perl itself.

@@ -1,5 +1,18 @@
 Revision history for PIX-Walker
 
+1.10	November 12, 2008
+	Fixed the matching logic in PIX::Accesslist::Line->match.
+
+	Updated POD for all modules.
+
+	Added support for icmp-type object groups.
+
+	Fixed a couple of minor bugs as reported by other users.
+
+	Updated PIX::Accesslist::Line->print to allow for an $any
+	string to be specified to change '0.0.0.0/0' entries in the
+	output to a string of your choosing.
+
 1.03	June 13, 2006
 	Added some methods to PIX::Accesslist::Line for fetching
 	the logical elements of a line as strings (protocol, source, 

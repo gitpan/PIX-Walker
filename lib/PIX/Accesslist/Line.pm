@@ -3,7 +3,7 @@ package PIX::Accesslist::Line;
 use strict;
 use warnings;
 
-our $VERSION = '1.01';
+our $VERSION = '1.10';
 
 =pod
 
@@ -15,15 +15,19 @@ PIX::Accesslist::Line - ACL line object for each line of an PIX::Accesslist.
 
 PIX::Accesslist::Line is used by PIX::Accesslist to hold a single line of an ACL.
 Each line can be searched against a set of IP & port criteria to find a match.
+Users will not usually have to create objects from this directly.
 
 See B<PIX::Accesslist> for more information regarding PIX Accesslists.
 
  $line = new PIX::Accesslist::Line(
 	$action, $proto, $source, 
-	$sport, $dest, $dport, $idx
+	$source_ort, $dest, $dest_port, $idx,
+	$parent_acl_obj
  );
 
 =head1 METHODS
+
+=over
 
 =cut
 
@@ -31,7 +35,7 @@ sub new {
 	my $proto = shift;
 	my $class = ref($proto) || $proto;
 	my $self = { };
-	my ($action, $protocol, $source, $sport, $dest, $dport, $idx) = @_;
+	my ($action, $protocol, $source, $sport, $dest, $dport, $idx, $parent) = @_;
 
 	$self->{class} = $class;
 	$self->{action} = lc $action;
@@ -41,6 +45,7 @@ sub new {
 	$self->{dest} = $dest;
 	$self->{dport} = $dport;
 	$self->{idx} = $idx || 0;
+	$self->{parent} = $parent;	# parent PIX::Accesslist object
 
 	bless($self, $class);
 	$self->_init;
@@ -50,7 +55,7 @@ sub new {
 
 sub _init { }
 
-=item B<elements()>
+=item B<elements( )>
 
 =over
 
@@ -103,7 +108,8 @@ you get accurate matching you must provide all criteria shown below.
 
 =back
 
-B<Note:> source port is not generally used. You will usually only want to use {dport}.
+B<Note:> source port {sport} is not usually used. You will usually only want to
+use {dport}.
 
 =back
 
@@ -111,46 +117,61 @@ B<Note:> source port is not generally used. You will usually only want to use {d
 sub match {
 	my $self = shift;
 	my $arg = ref $_[0] ? $_[0] : { @_ };
-	my $ok = undef;
+	my $ok = 0;
 	$arg->{proto} ||= 'ip';		# default to IP
-
+	
+	# shortcut, alias {port} to {dport} if specified
+	$arg->{dport} ||= $arg->{port} if exists $arg->{port};
+	
 	# does the protocol match?
 	if ($arg->{proto} eq 'ip') {
 		$ok = 1;
 	} else {
 		$ok = scalar grep { lc $_ eq 'ip' or lc $_ eq $arg->{proto} } $self->{proto}->list;
 	}
-#	print "PROTO=".($ok||'')."\n";
+	#print "PROTO =$ok\n";
+	return 0 unless $ok;
 
-	# does the source IP match our group?
-	if ($ok and $arg->{source}) {
-		$ok = $self->{source}->matchip($arg->{source});
-		if ($ok and $arg->{sport} and $self->{sport}) {
-			$ok = $self->{sport}->matchport($arg->{sport});
-#			print "SPORT=".($ok||'')."\n";
-		}
-	}
-#	print "SOURCE=".($ok||'')."\n";
+	# check for ICMP TYPES if the protcol is ICMP and we are an icmp-type group
+	#if ($self->{dport}->type eq 'icmp-type' and grep { $_ eq 'icmp' } $self->{proto}->list) {
+	#	warn "ICMP TEST\n";
+	#}
 
-	# does the destination IP match our group?
-	if ($ok and $arg->{dest}) {
-		$ok = $self->{dest}->matchip($arg->{dest});
-		if ($ok and $arg->{dport} and $self->{dport}) {
-			$ok = $self->{dport}->matchport($arg->{dport});
-#			print "DPORT=".($ok||'')."\n";
-		}
-	}
-#	print "DEST=".($ok||'')."\n";
 
-	return $ok;
+	# does the source IP match?
+	$ok = $self->{source}->matchip($arg->{source}) if $arg->{source} and $self->{source};
+	#print "SOURCE=$ok\n";
+	return 0 unless $ok;
+
+	# does the source port match?
+	$ok = $self->{sport}->matchport($arg->{sport}) if $arg->{sport} and $self->{sport};
+	#print "SPORT =$ok\n";
+	return 0 unless $ok;
+
+	# does the destination IP match?
+	$ok = $self->{dest}->matchip($arg->{dest}) if $arg->{dest} and $self->{dest};
+	#print "DEST  =$ok\n";
+	return 0 unless $ok;
+
+	# does the destination port match?
+	$ok = $self->{dport}->matchport($arg->{dport}) if $arg->{dport} and $self->{dport};
+	#print "DPORT =".($ok||'')."\n";
+	return 0 unless $ok;
+	
+	return 1;
 }
 
-=item B<print()>
+=item B<print([$any])>
 
 =over
 
-Pretty prints the ACL line. Tries to make it easy to read. If object-group's are used
-the names are printed instead of IP's if more than a single IP is present for a line.
+Pretty prints the ACL line. Tries to make it easy to read. If object-group's are
+used the names are printed instead of IP's if more than a single IP is present
+for a line.
+
+$any is an optional string that will be used for any IP that represents 'ANY',
+defaults to: 0.0.0.0/0. It's useful to change this to 'ANY' to make the output
+easier to read.
 
   1)  permit (tcp)   192.168.0.0/24 -> 0.0.0.0/0 [Web_Services_tcp: 80,443]
 
@@ -159,22 +180,49 @@ the names are printed instead of IP's if more than a single IP is present for a 
 =cut
 sub print {
 	my $self = shift;
+	my $any = shift || '0.0.0.0/0';
 	my $output = '';
 
 	$output .= sprintf("%3d) ", $self->num);
 	$output .= sprintf("%6s %-10s", $self->{action}, "(" . $self->proto_str . ")");
-	$output .= $self->source_str;
-	$output .= " [" . $self->sourceport_str . "]" if $self->sourceport_str;
-	$output .= " -> ";
-	$output .= $self->dest_str;
 
-	if ($self->{proto}->first !~ /^(ip|icmp)$/) {
+	# display the source
+	$output .= $self->source_str($any);
+	#if ($self->{proto}->first !~ /^(ip|icmp)$/) {
+	if ($self->{proto}->first ne 'ip') {
+		if ($self->{sport} and $self->sourceport_str) {
+			my $name = $self->{sport}->name;
+			my @enum = $self->{sport}->enumerate;
+			my @list = $self->{sport}->list;
+			$output .= sprintf(" [%s]", $name =~ /^unnamed/ && @enum == 1  
+				? @enum
+				: @enum <= 4
+					? $name . ": " .join(',',@enum) 
+					: $name . " (" . @list . " ranges; " . @enum . " ports)"
+			);
+		} else {
+			# since source ports are not usually used in most ACL's
+			# (from my experience) lets not show anything if ANY
+			# is allowed.
+			$output .= "";
+		}
+	}
+
+	$output .= " -> ";
+
+	# display the destination
+	$output .= $self->dest_str($any);
+	#if ($self->{proto}->first !~ /^(ip|icmp)$/) {
+	if ($self->{proto}->first ne 'ip') {
 		if ($self->{dport} and $self->destport_str) {
-			$output .= sprintf(" [%s]", $self->{dport}->name =~ /^unnamed/ && $self->{dport}->enumerate == 1  
-				? $self->{dport}->enumerate
-				: $self->{dport}->enumerate <= 4
-					? $self->{dport}->name . ": " .join(',',$self->{dport}->enumerate) 
-					: $self->{dport}->name . " (" . $self->{dport}->list . " ranges; " . $self->{dport}->enumerate . " ports)"
+			my $name = $self->{dport}->name;
+			my @enum = $self->{dport}->enumerate;
+			my @list = $self->{dport}->list;
+			$output .= sprintf(" [%s]", $name =~ /^unnamed/ && @enum == 1  
+				? @enum
+				: @enum <= 4
+					? $name . ": " .join(',',@enum) 
+					: $name . " (" . @list . " ranges; " . @enum . " ports)"
 			);
 		} else {
 			$output .= " [any]";
@@ -184,7 +232,7 @@ sub print {
 	return $output;
 }
 
-=item B<num()>
+=item B<num( )>
 
 =over
 
@@ -212,32 +260,38 @@ sub action { $_[0]->{action} }
 sub proto_str { return wantarray ? $_[0]->{proto}->list : join(',',$_[0]->{proto}->list) }
 sub source_str {
 	my $self = shift;
+	my $any = shift || '0.0.0.0/0';
+	my $str;
 	if ($self->{source}->name =~ /^unnamed/ && $self->{source}->list == 1) {
-		return $self->{source}->first;
+		$str = $self->{source}->first;
 	} else {
-		return $self->{source}->name;
+		$str = $self->{source}->name;
 	}
+	return $str eq '0.0.0.0/0' ? $any : $str;
 }
 sub dest_str {
 	my $self = shift;
+	my $any = shift || '0.0.0.0/0';
+	my $str;
 	if ($self->{dest}->name =~ /^unnamed/ && $self->{dest}->list == 1) {
-		return $self->{dest}->first;
+		$str = $self->{dest}->first;
 	} else {
-		return $self->{dest}->name;
+		$str = $self->{dest}->name;
 	}
+	return $str eq '0.0.0.0/0' ? $any : $str;
 }
 sub sourceport_str {
 	my $self = shift;
-	return '' unless $self->{proto}->first !~ /^(ip|icmp)$/ && $self->{sport};
-	if ($self->{sport}->name =~ /^unnamed/ && $self->{sport}->list == 1) {
-		return $self->{sport}->first;
+	return '' unless $self->{proto}->first ne 'ip' && $self->{sport};
+	if ($self->{sport}->name =~ /^unnamed/ && $self->{sport}->enumerate == 1) {
+		return $self->{sport}->enumerate;
 	} else {
 		return $self->{sport}->name;
 	}
 }
 sub destport_str {
 	my $self = shift;
-	return '' unless $self->{proto}->first !~ /^(ip|icmp)$/ && $self->{dport};
+	return '' unless $self->{proto}->first ne 'ip' && $self->{dport};
 	if ($self->{dport}->name =~ /^unnamed/ && $self->{dport}->enumerate == 1) {
 		return $self->{dport}->enumerate;
 	} else {
@@ -264,12 +318,11 @@ sub destportdetail_str {
 
 1; 
 
-
-__DATA__
+=pod
 
 =head1 AUTHOR
 
-Jason Morriss, C<< <lifo at liche.net> >>
+Jason Morriss <lifo 101 at - gmail dot com>
 
 =head1 BUGS
 
@@ -282,15 +335,21 @@ your bug as I make changes.
 =head1 SUPPORT
 
     perldoc PIX::Walker
+
     perldoc PIX::Accesslist
     perldoc PIX::Accesslist::Line
 
+    perldoc PIX::Object
+    perldoc PIX::Object::network
+    perldoc PIX::Object::service
+    perldoc PIX::Object::protocol
+    perldoc PIX::Object::icmp_type
+
 =head1 COPYRIGHT & LICENSE
 
-Copyright 2006 Jason Morriss, all rights reserved.
+Copyright 2006-2008 Jason Morriss, all rights reserved.
 
 This program is free software; you can redistribute it and/or modify it
 under the same terms as Perl itself.
 
 =cut
-
